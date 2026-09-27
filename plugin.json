@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
+  "name": "观看 MV",
+  "version": "0.1.0",
+  "description": "一键在哔哩哔哩 / 优酷 / 腾讯视频 / 爱奇艺 / 芒果TV 搜索当前歌曲的 MV，支持新标签页跳转与实验性内嵌面板。",
+  "author": "514475844",
+  "homepage": "https://github.com/514475844/songloft-plugin-watch-mv",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "entryPath": "watch-mv",
+  "main": "main.js",
+  "minHostVersion": "1.3.0",
+  "renderEngine": "webview",
+  "staticHash": false,
+  "permissions": [
+    "storage", "persistent-storage", "songs.read", "songs.write",
+    "playlists.read", "playlists.write", "fs", "fs:music", "fs:external",
+    "inter-plugin", "command", "jsenv", "net", "websocket"
+  ],
+  "publicPaths": ["static/"],
+  "updateUrl": "https://raw.githubusercontent.com/514475844/songloft-plugin-watch-mv/main/plugin.json",
+  "download_url": "https://github.com/514475844/songloft-plugin-watch-mv/releases/download/v0.1.0/watch-mv.jsplugin.zip"
+}

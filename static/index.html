@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>观看 MV</title>
+<style>
+:root{--bg:#f6f4f1;--card:#fff;--tx:#2b2b2b;--sub:#8a8a8a;--line:#e8e4df;--pri:#e8848a;}
+@media (prefers-color-scheme: dark){:root{--bg:#1b1d22;--card:#24262c;--tx:#e4e4e4;--sub:#9a9a9a;--line:#34373e;}}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--tx);font-size:14px}
+h1{font-size:19px;margin:0 0 4px}
+.sub{color:var(--sub);font-size:12px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+fieldset{border:1px solid var(--line);border-radius:10px;margin:8px 0;padding:8px 10px}
+legend{font-size:12px;color:var(--sub);padding:0 6px}
+label{cursor:pointer}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:6px 0}
+input[type=text]{background:var(--bg);color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:240px}
+button{border:0;border-radius:10px;padding:9px 16px;font-size:14px;cursor:pointer;background:var(--pri);color:#fff}
+button.ghost{background:transparent;color:var(--tx);border:1px solid var(--line)}
+.mvbtns{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.mvbtns button{min-width:110px}
+iframe{width:100%;height:420px;border:1px solid var(--line);border-radius:12px;margin-top:10px;background:#000}
+.notice{color:var(--warn);font-size:12.5px;margin-top:8px;display:none}
+.now{font-size:15px;margin:4px 0 10px}
+.now b{color:var(--pri)}
+</style>
+</head>
+<body>
+<h1>📺 观看 MV</h1>
+<div class="sub">搜索词 = 歌名 + 歌手 + MV。B站/腾讯/爱奇艺等站点设了防嵌入，默认新标签页打开最稳。</div>
+
+<div class="card">
+  <div class="now" id="now">在下面输入或从曲库选择歌曲。</div>
+  <div class="row">
+    <input type="text" id="tTitle" placeholder="歌名">
+    <input type="text" id="tArtist" placeholder="歌手（可空）">
+    <button class="ghost" onclick="pickSong()">🎼 从曲库选歌</button>
+  </div>
+  <div id="picker" style="display:none;max-height:220px;overflow:auto;margin-top:8px"></div>
+  <div class="mvbtns" id="btns"></div>
+  <div class="notice" id="hint">部分站点（腾讯/爱奇艺等）设置了防嵌入，若上方一片空白，请用「在新标签页打开」。</div>
+</div>
+
+<div class="card">
+  <fieldset><legend>设置（保存在本机浏览器）</legend>
+    <div class="row" id="siteBoxes">
+      <label><input type="checkbox" data-site="bilibili" checked> 哔哩哔哩</label>
+      <label><input type="checkbox" data-site="youku"> 优酷</label>
+      <label><input type="checkbox" data-site="qq" checked> 腾讯视频</label>
+      <label><input type="checkbox" data-site="iqiyi"> 爱奇艺</label>
+      <label><input type="checkbox" data-site="mgtv"> 芒果TV</label>
+    </div>
+    <div class="row">
+      <label><input type="radio" name="om" value="tab" checked> 新标签页跳转</label>
+      <label><input type="radio" name="om" value="embed"> 内嵌播放面板（实验）</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="showBtn" checked> 尝试在宿主播放器注入「观看 MV」按钮（宿主不支持时静默跳过）</label>
+    </div>
+    <div class="row"><button class="ghost" onclick="saveCfg()">💾 保存设置</button></div>
+  </fieldset>
+</div>
+
+<div id="embedWrap" style="display:none"></div>
+
+<script>
+'use strict';
+var SITES = {
+  bilibili: function(q){ return 'https://search.bilibili.com/all?keyword=' + encodeURIComponent(q); },
+  youku:    function(q){ return 'https://so.youku.com/search_video/q_' + encodeURIComponent(q); },
+  qq:       function(q){ return 'https://v.qq.com/x/search/?q=' + encodeURIComponent(q); },
+  iqiyi:    function(q){ return 'https://so.iqiyi.com/so/q_' + encodeURIComponent(q); },
+  mgtv:     function(q){ return 'https://so.mgtv.com/so/k-' + encodeURIComponent(q); }
+};
+var NAMES = {bilibili:'哔哩哔哩', youku:'优酷', qq:'腾讯视频', iqiyi:'爱奇艺', mgtv:'芒果TV'};
+var CFG_KEY = 'watch-mv-cfg-v1';
+
+function token(){
+  var q = new URLSearchParams(location.search).get('access_token');
+  if (q) return q;
+  var direct = window.SongloftPlugin && window.SongloftPlugin.getAuthToken && window.SongloftPlugin.getAuthToken();
+  if (direct) return direct;
+  try { return JSON.parse(localStorage.getItem('songloft-auth')||'{}').accessToken || ''; } catch(e){ return ''; }
+}
+function api(path){
+  var h = {};
+  var t = token();
+  if (t) h.Authorization = 'Bearer ' + t;
+  return fetch(path, {headers: h}).then(function(r){
+    if (!r.ok) throw new Error('API ' + r.status);
+    return r.json();
+  });
+}
+function loadCfg(){
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); } catch(e){ return {}; }
+}
+function saveCfg(){
+  var c = {
+    sites: Array.prototype.map.call(document.querySelectorAll('#siteBoxes input:checked'), function(x){ return x.getAttribute('data-site'); }),
+    openMode: (document.querySelector('input[name=om]:checked')||{}).value || 'tab',
+    showBtn: document.getElementById('showBtn').checked
+  };
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){}
+  render(c);
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+function currentQuery(){
+  return {
+    title: document.getElementById('tTitle').value.trim(),
+    artist: document.getElementById('tArtist').value.trim()
+  };
+}
+function openSite(key){
+  var q = currentQuery();
+  var s = (q.title + ' ' + q.artist).trim() + ' MV';
+  if (!q.title && !q.artist) { alert('先填歌名或歌手'); return; }
+  var c = loadCfg();
+  var url = SITES[key](s.trim());
+  if ((c.openMode || 'tab') === 'embed') {
+    var w = document.getElementById('embedWrap');
+    w.style.display = 'block';
+    w.innerHTML = '<div class="card"><div class="sub">' + esc(NAMES[key]) + ' 内嵌打开：' + esc(url) +
+      '　<button class="ghost" onclick="window.open(this.dataset.u,\'_blank\')" data-u="' + esc(url) + '">在新标签页打开</button>' +
+      '　<button class="ghost" onclick="closeEmbed()">关闭内嵌</button></div>' +
+      '<iframe src="' + esc(url) + '" referrerpolicy="no-referrer"></iframe></div>';
+    document.getElementById('hint').style.display = 'block';
+    setTimeout(function(){ document.getElementById('hint').style.display = 'block'; }, 2500);
+  } else {
+    window.open(url, '_blank');
+  }
+}
+function closeEmbed(){
+  var w = document.getElementById('embedWrap');
+  w.style.display = 'none';
+  w.innerHTML = '';
+}
+function render(c){
+  c = c || loadCfg();
+  var sel = c.sites && c.sites.length ? c.sites : ['bilibili', 'qq'];
+  document.querySelectorAll('#siteBoxes input').forEach(function(x){
+    x.checked = sel.indexOf(x.getAttribute('data-site')) >= 0;
+  });
+  document.querySelectorAll('input[name=om]').forEach(function(x){
+    x.checked = (x.value === (c.openMode || 'tab'));
+  });
+  if (c.showBtn === false) document.getElementById('showBtn').checked = false;
+  document.getElementById('btns').innerHTML = sel.map(function(k){
+    return '<button onclick="openSite(\'' + k + '\')">▶ ' + NAMES[k] + '</button>';
+  }).join('') || '<span class="sub">至少选择一个站点</span>';
+}
+function setNow(t, a){
+  document.getElementById('now').innerHTML = t
+    ? ('当前歌曲：<b>' + esc(t) + (a ? ' - ' + esc(a) : '') + '</b>')
+    : '在下面输入或从曲库选择歌曲。';
+  document.getElementById('tTitle').value = t || '';
+  document.getElementById('tArtist').value = a || '';
+}
+function pickSong(){
+  var p = document.getElementById('picker');
+  if (p.style.display === 'block') { p.style.display = 'none'; return; }
+  p.style.display = 'block';
+  p.innerHTML = '<div class="sub">加载曲库…</div>';
+  api('/api/v1/songs?limit=5000').then(function(d){
+    var songs = (d.songs || []).filter(function(s){ return s.title; });
+    p.innerHTML = '<input type="text" id="pk" placeholder="过滤…" style="width:100%;margin-bottom:6px">' +
+      '<div id="pklist" style="max-height:170px;overflow:auto"></div>';
+    var list = songs.slice(0, 300).map(function(s){
+      return '<div style="padding:4px 2px;cursor:pointer;border-bottom:1px solid var(--line)" onclick="choose(\'' +
+        esc(s.id) + '\',\'' + esc((s.title||'').replace(/'/g, '')) + '\',\'' + esc((s.artist||'').replace(/'/g, '')) + '\')">' +
+        esc(s.title) + (s.artist ? ' — ' + esc(s.artist) : '') + '</div>';
+    }).join('');
+    document.getElementById('pklist').innerHTML = list || '<div class="sub">没有歌曲</div>';
+    document.getElementById('pk').addEventListener('input', function(e){
+      var k = e.target.value.toLowerCase();
+      document.getElementById('pklist').innerHTML = songs.filter(function(s){
+        return ((s.title||'') + ' ' + (s.artist||'')).toLowerCase().indexOf(k) >= 0;
+      }).slice(0, 100).map(function(s){
+        return '<div style="padding:4px 2px;cursor:pointer;border-bottom:1px solid var(--line)" onclick="choose(\'' +
+          esc(s.id) + '\',\'' + esc((s.title||'').replace(/'/g, '')) + '\',\'' + esc((s.artist||'').replace(/'/g, '')) + '\')">' +
+          esc(s.title) + (s.artist ? ' — ' + esc(s.artist) : '') + '</div>';
+      }).join('');
+    });
+  }).catch(function(e){ p.innerHTML = '<div class="sub">加载失败：' + esc(e.message) + '</div>'; });
+}
+function choose(id, t, a){
+  document.getElementById('picker').style.display = 'none';
+  setNow(t, a);
+  try { localStorage.setItem('watch-mv-last', JSON.stringify({title: t, artist: a})); } catch(e){}
+}
+
+/* 初始化 */
+(function(){
+  var c = loadCfg();
+  render(c);
+  try {
+    var last = JSON.parse(localStorage.getItem('watch-mv-last')||'null');
+    if (last && last.title) setNow(last.title, last.artist);
+  } catch(e){}
+  /* 宿主播放器桥接探测（有则尝试注入按钮，无则静默跳过） */
+  try {
+    if (c.showBtn !== false && window.SongloftPlugin && typeof window.SongloftPlugin.getPlayerInfo === 'function') {
+      window.SongloftPlugin.getPlayerInfo(function(info){
+        if (info && info.title) setNow(info.title, info.artist);
+      });
+    }
+  } catch(e){ /* 静默跳过 */ }
+})();
+</script>
+</body>
+</html>
